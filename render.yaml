@@ -1,0 +1,22 @@
+databases:
+  - name: yabatech_auth
+    plan: free
+    databaseName: student_auth
+    user: yabatech
+
+services:
+  - type: web
+    plan: free
+    name: Yabatech-Facial-Recognition
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "python -m gunicorn facial_recognition_api.wsgi:application -k uvicorn.workers.UvicornWorker"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: yabatech_auth
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: WEB_CONCURRENCY
+        value: 4
