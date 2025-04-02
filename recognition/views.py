@@ -228,12 +228,13 @@ class RecognitionViewSet(viewsets.ModelViewSet):
                 # MODEL OPTIONS:
                 # buffalo_s = smaller model (less memory, less accurate)
                 # buffalo_l = larger model (more memory, more accurate)
-                # CURRENT: Using buffalo_s to avoid memory errors
-                face_analyzer = FaceAnalysis(name="buffalo_s")  # Switch from buffalo_l to buffalo_s (smaller model)
-                # To use more accurate model (requires more memory):
-                # face_analyzer = FaceAnalysis(name="buffalo_l")  
+                # CURRENT: Using buffalo_l for better accuracy (requires more memory)
+                face_analyzer = FaceAnalysis(name="buffalo_l")  # Using larger model for better accuracy
+                # face_analyzer = FaceAnalysis(name="buffalo_s")  # Smaller model option (if memory issues occur)
                 
-                face_analyzer.prepare(ctx_id=0, det_size=(320, 320))  # Reduced detection size for better performance
+                # Using default detection size for better accuracy
+                face_analyzer.prepare(ctx_id=0)  # Default size for better accuracy
+                # face_analyzer.prepare(ctx_id=0, det_size=(320, 320))  # Reduced size for lower memory usage
             except Exception as e:
                 # Fall back to default model with minimal settings if the specific one fails
                 face_analyzer = FaceAnalysis()
