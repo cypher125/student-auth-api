@@ -186,27 +186,25 @@ class RecognitionViewSet(viewsets.ModelViewSet):
         if 'image' not in request.FILES:
             return Response({'error': 'No image file provided'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create a temp path for the uploaded image
+        # Import InsightFace and other dependencies
+        import cv2
+        import numpy as np
+        from insightface.app import FaceAnalysis
+        
+        image_file = request.FILES['image']
+        
+        # Save uploaded image temporarily
         temp_path = tempfile.gettempdir()
         temp_image_path = os.path.join(temp_path, 'temp_recognize.jpg')
         
+        with open(temp_image_path, 'wb') as f:
+            for chunk in image_file.chunks():
+                f.write(chunk)
+        
+        # Get threshold from settings or use default (lower than DeepFace as InsightFace is more precise)
+        recognition_threshold = float(os.environ.get('FACE_RECOGNITION_THRESHOLD', 0.35))
+        
         try:
-            # Import InsightFace and other dependencies
-            import cv2
-            import numpy as np
-            from insightface.app import FaceAnalysis
-            import gc
-            
-            image_file = request.FILES['image']
-            
-            # Save uploaded image temporarily
-            with open(temp_image_path, 'wb') as f:
-                for chunk in image_file.chunks():
-                    f.write(chunk)
-            
-            # Get threshold from settings or use default (lower than DeepFace as InsightFace is more precise)
-            recognition_threshold = float(os.environ.get('FACE_RECOGNITION_THRESHOLD', 0.35))
-            
             # Find all students with registered face images
             students = Student.objects.exclude(face_image='')
             
@@ -223,38 +221,13 @@ class RecognitionViewSet(viewsets.ModelViewSet):
             # Start timer for processing time measurement
             start_time = time.time()
             
-            # Initialize InsightFace with a more lightweight model
-            try:
-                # MODEL OPTIONS:
-                # buffalo_s = smaller model (less memory, less accurate)
-                # buffalo_l = larger model (more memory, more accurate)
-                # CURRENT: Using buffalo_l for better accuracy (requires more memory)
-                face_analyzer = FaceAnalysis(name="buffalo_l")  # Using larger model for better accuracy
-                # face_analyzer = FaceAnalysis(name="buffalo_s")  # Smaller model option (if memory issues occur)
-                
-                # Using default detection size for better accuracy
-                face_analyzer.prepare(ctx_id=0)  # Default size for better accuracy
-                # face_analyzer.prepare(ctx_id=0, det_size=(320, 320))  # Reduced size for lower memory usage
-            except Exception as e:
-                # Fall back to default model with minimal settings if the specific one fails
-                face_analyzer = FaceAnalysis()
-                face_analyzer.prepare(ctx_id=0, det_size=(320, 320))
+            # Initialize InsightFace
+            face_analyzer = FaceAnalysis(name="buffalo_l")
+            face_analyzer.prepare(ctx_id=0)  # Use CPU (ctx_id=0) or GPU if available
             
             # Load and analyze the uploaded image
-            try:
-                img = cv2.imread(temp_image_path)
-                # Resize image to reduce memory usage
-                img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
-                faces = face_analyzer.get(img)
-            except Exception as e:
-                # Clean up
-                if os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-                
-                return Response({
-                    'success': False,
-                    'error': f'Error processing image: {str(e)}'
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            img = cv2.imread(temp_image_path)
+            faces = face_analyzer.get(img)
             
             # Check if a face was detected
             if len(faces) == 0:
@@ -289,8 +262,6 @@ class RecognitionViewSet(viewsets.ModelViewSet):
                 try:
                     # Load and analyze the student's image
                     student_img = cv2.imread(student_image_path)
-                    # Resize student image to save memory
-                    student_img = cv2.resize(student_img, (640, 480), interpolation=cv2.INTER_AREA)
                     student_faces = face_analyzer.get(student_img)
                     
                     if len(student_faces) == 0:
@@ -310,11 +281,6 @@ class RecognitionViewSet(viewsets.ModelViewSet):
                     if confidence > highest_confidence:
                         highest_confidence = confidence
                         best_match = student
-                        
-                    # Force garbage collection after each comparison to free memory
-                    del student_img, student_faces, student_face, student_embedding
-                    gc.collect()
-                    
                 except Exception as e:
                     # Skip this comparison if there's an error
                     print(f"Error comparing with student {student.id}: {str(e)}")
@@ -396,32 +362,14 @@ class RecognitionViewSet(viewsets.ModelViewSet):
                     'confidence': highest_confidence if best_match else 0.0
                 }, status=status.HTTP_404_NOT_FOUND)
             
-        except MemoryError:
-            # Handle out of memory errors specifically
-            if os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
-                
-            # Force garbage collection
-            import gc
-            gc.collect()
-                
-            return Response({
-                'success': False,
-                'error': 'Server memory limit exceeded. Please try again later or use manual login.'
-            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         except Exception as e:
             # Clean up
             if os.path.exists(temp_image_path):
                 os.remove(temp_image_path)
-                
-            # Log the error for debugging
-            import traceback
-            print(f"Recognition error: {str(e)}")
-            print(traceback.format_exc())
-                
+            
             return Response({
                 'success': False,
-                'error': f'Recognition process failed: {str(e)}'
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
